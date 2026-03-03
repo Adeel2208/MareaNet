@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.8, 3.9, '3.10']
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest black flake8
+    
+    - name: Lint with flake8
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 marea_net --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings
+        flake8 marea_net --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+    
+    - name: Check code formatting with black
+      run: |
+        black --check marea_net train.py inference.py evaluate.py
+    
+    - name: Test imports
+      run: |
+        python -c "from marea_net import build_marea_net, Config; print('✅ Imports successful')"
+    
+    - name: Test model build
+      run: |
+        python -c "
+        from marea_net import build_marea_net, Config
+        import tensorflow as tf
+        config = Config()
+        model = build_marea_net(config)
+        print(f'✅ Model built: {model.count_params():,} parameters')
+        "
+    
+    - name: Test configuration
+      run: |
+        python -c "
+        from marea_net import Config
+        config = Config()
+        assert config.get('model.num_classes') == 8
+        print('✅ Configuration working')
+        "
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install black flake8 mypy
+    
+    - name: Run black
+      run: black --check .
+    
+    - name: Run flake8
+      run: flake8 marea_net --max-line-length=100
+
+  docs:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Check documentation files
+      run: |
+        test -f README.md
+        test -f QUICK_START.md
+        test -f CONTRIBUTING.md
+        test -f docs/ARCHITECTURE.md
+        test -f docs/TRAINING.md
+        test -f docs/API.md
+        echo "✅ All documentation files present"

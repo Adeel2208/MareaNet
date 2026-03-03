@@ -1,0 +1,81 @@
+# MAREA-Net v5.5-CNX Configuration
+
+model:
+  name: "MAREA_Net_v5.5_ConvNeXtBase"
+  input_height: 320
+  input_width: 320
+  num_classes: 8
+  backbone: "ConvNeXtBase"
+  backbone_weights: "imagenet"
+
+training:
+  batch_size: 8
+  epochs: 100
+  unfreeze_epoch: 10
+  
+  # Learning rate schedule
+  lr_warmup: 1.0e-5
+  lr_max: 1.0e-4
+  lr_min: 1.0e-6
+  warmup_epochs: 5
+  weight_decay: 1.0e-4
+  
+  # Loss weights
+  tversky_alpha: 0.3
+  tversky_beta: 0.7
+  ohem_keep_ratio: 0.7
+  label_smoothing: 0.05
+  plant_dice_weight: 0.15
+  
+  # Augmentation
+  cutmix_prob: 0.3
+  oversample_plant: 2
+
+classes:
+  names:
+    - "Background"
+    - "Human Divers"
+    - "Aquatic Plants"
+    - "Wrecks/Ruins"
+    - "Robots/ROV"
+    - "Reefs/Inverts"
+    - "Fish/Vertebrates"
+    - "Sea-floor/Rocks"
+  
+  # Focal loss gamma per class
+  gammas: [1.0, 3.0, 5.0, 3.0, 5.0, 2.0, 3.0, 2.0]
+  
+  # Minimum class weights
+  weight_floors:
+    1: 2.0  # Human Divers
+    2: 1.5  # Aquatic Plants
+    3: 4.0  # Wrecks/Ruins
+    4: 3.5  # Robots/ROV
+    6: 2.0  # Fish/Vertebrates
+  
+  # RGB color palette
+  palette:
+    - [0, 0, 0]        # Background
+    - [0, 0, 255]      # Human Divers
+    - [0, 255, 0]      # Aquatic Plants
+    - [0, 255, 255]    # Wrecks/Ruins
+    - [255, 0, 0]      # Robots/ROV
+    - [255, 0, 255]    # Reefs/Inverts
+    - [255, 255, 0]    # Fish/Vertebrates
+    - [255, 255, 255]  # Sea-floor/Rocks
+
+data:
+  train_images: "data/train/images"
+  train_masks: "data/train/masks"
+  test_images: "data/test/images"
+  test_masks: "data/test/masks"
+
+gpu:
+  memory_growth: true
+  mixed_precision: "float32"
+  xla_jit: true
+
+inference:
+  tta_augmentations: 8
+  temperature: 1.0
+  batch_size: 4
