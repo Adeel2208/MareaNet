@@ -143,24 +143,25 @@ def save_model(model, save_path, config=None):
 def load_model(model_path):
     """
     Load saved model with custom objects.
-    
+
     Args:
         model_path: Path to saved model
-        
+
     Returns:
         Loaded Keras model
     """
-    from .layers import (SimAM, StripPooling, SBCC, WDTS, 
+    from .layers import (SimAM, StripPooling, SBCC, DSTS, WDTS,
                          CGAFusion, MAREADecoderBlock, ASPP_SP)
-    
+
     custom_objects = {
         'SimAM': SimAM,
         'StripPooling': StripPooling,
         'SBCC': SBCC,
-        'WDTS': WDTS,
+        'DSTS': DSTS,
+        'WDTS': WDTS,  # Backward-compatibility alias
         'CGAFusion': CGAFusion,
         'MAREADecoderBlock': MAREADecoderBlock,
         'ASPP_SP': ASPP_SP,
     }
-    
+
     return keras.models.load_model(model_path, custom_objects=custom_objects)

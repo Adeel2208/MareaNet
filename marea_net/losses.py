@@ -150,39 +150,59 @@ def plant_dice_loss(y_true, y_pred, n_cls, plant_class=2):
     return 1.0 - tf.reduce_mean((2.0 * inter + 1e-7) / (union + 1e-7))
 
 
-def plant_presence_loss(y_true_mask, y_pred_binary):
+def rare_class_presence_loss(y_true_mask, y_pred_binary, rare_class_index=2):
     """
-    Binary cross-entropy for plant presence prediction.
-    
+    Binary cross-entropy for rare-class presence prediction.
+
+    Predicts whether the rare class (aquatic plants on SUIM, scallop on
+    DUT-USEG, etc.) is present anywhere in the image.  The rare_class_index
+    is dataset-specific and should be set via config.
+
     Args:
-        y_true_mask: Ground truth mask [B, H, W]
-        y_pred_binary: Predicted plant presence [B, 1]
-        
+        y_true_mask:      Ground truth mask [B, H, W]
+        y_pred_binary:    Predicted presence score [B, 1]
+        rare_class_index: Integer class index of the rare class.
+
     Returns:
         Scalar loss value
     """
-    has_plant = tf.cast(
-        tf.reduce_any(tf.equal(tf.cast(y_true_mask, tf.int32), 2), axis=[1, 2]),
-        tf.float32
+    has_rare = tf.cast(
+        tf.reduce_any(
+            tf.equal(tf.cast(y_true_mask, tf.int32), rare_class_index),
+            axis=[1, 2],
+        ),
+        tf.float32,
     )
     return tf.reduce_mean(
         tf.keras.losses.binary_crossentropy(
-            has_plant,
-            tf.squeeze(tf.cast(y_pred_binary, tf.float32), axis=-1)
+            has_rare,
+            tf.squeeze(tf.cast(y_pred_binary, tf.float32), axis=-1),
         )
     )
+
+
+# Backward-compatibility alias
+plant_presence_loss = rare_class_presence_loss
 
 
 def create_loss_fn(class_weights, config: Config):
     """
     Create combined loss function for MAREA-Net.
-    
+
+    Total loss (Eq. 1 in the paper):
+      L = L_focal-OHEM
+        + L_Tversky
+        + 0.5  * L_Dice
+        + 0.15 * L_rare-Dice
+        + 0.3  * L_aux
+        + 0.2  * L_presence
+
     Args:
-        class_weights: Numpy array of class weights
-        config: Configuration object
-        
+        class_weights: Numpy array of class weights [N_CLS]
+        config:        Configuration object
+
     Returns:
-        Loss function
+        loss_fn(y_true, y_preds) → scalar
     """
     n_cls = config.get('model.num_classes', 8)
     gammas = config.get('classes.gammas', [1.0] * n_cls)
@@ -190,21 +210,25 @@ def create_loss_fn(class_weights, config: Config):
     tversky_beta = config.get('training.tversky_beta', 0.7)
     ohem_keep = config.get('training.ohem_keep_ratio', 0.7)
     label_smooth = config.get('training.label_smoothing', 0.05)
-    plant_dice_weight = config.get('training.plant_dice_weight', 0.15)
-    
+    rare_dice_weight = config.get('training.rare_dice_weight',
+                                  config.get('training.plant_dice_weight', 0.15))
+    rare_class_idx = config.get('training.rare_class_index', 2)
+
     cw = tf.constant(class_weights, dtype=tf.float32)
     gm = tf.constant(gammas, dtype=tf.float32)
-    
+
     def loss_fn(y_true, y_preds):
-        seg_pred, aux_pred, plant_pred = y_preds
-        
+        seg_pred, aux_pred, presence_pred = y_preds
+
         return (
             focal_ce_ohem(y_true, seg_pred, cw, gm, ohem_keep, label_smooth)
             + tversky_loss(y_true, seg_pred, tversky_alpha, tversky_beta, n_cls)
-            + 0.5 * dice_loss(y_true, seg_pred, n_cls)
-            + plant_dice_weight * plant_dice_loss(y_true, seg_pred, n_cls)
-            + 0.3 * focal_ce_ohem(y_true, aux_pred, cw, gm, 0.9, label_smooth)
-            + 0.2 * plant_presence_loss(y_true, plant_pred)
+            + 0.5  * dice_loss(y_true, seg_pred, n_cls)
+            + rare_dice_weight * plant_dice_loss(y_true, seg_pred, n_cls,
+                                                 plant_class=rare_class_idx)
+            + 0.3  * focal_ce_ohem(y_true, aux_pred, cw, gm, 0.9, label_smooth)
+            + 0.2  * rare_class_presence_loss(y_true, presence_pred,
+                                              rare_class_index=rare_class_idx)
         )
-    
+
     return loss_fn

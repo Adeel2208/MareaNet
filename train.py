@@ -9,10 +9,10 @@ import tensorflow as tf
 
 from marea_net.config import Config
 from marea_net.model import build_marea_net, set_encoder_trainable
-from marea_net.data import build_dataset, find_plant_samples, cutmix_batch
+from marea_net.data import build_dataset, find_rare_class_samples
 from marea_net.losses import compute_class_weights, create_loss_fn
 from marea_net.metrics import evaluate_miou
-from marea_net.utils import (configure_gpu, lr_schedule, make_optimizer, 
+from marea_net.utils import (configure_gpu, lr_schedule, make_optimizer,
                               make_train_step, save_model)
 
 
@@ -54,14 +54,16 @@ def train(config, args):
     # Configure GPU
     configure_gpu(config)
     
-    # Find plant samples for oversampling
-    print("\n📂 Scanning for plant images...")
-    plant_samples = find_plant_samples(
+    # Find rare-class samples for oversampling
+    rare_color = tuple(config.get('training.rare_class_color', [0, 255, 0]))
+    print(f"\n📂 Scanning for rare-class images (colour {rare_color})...")
+    rare_samples = find_rare_class_samples(
         config.get('data.train_images'),
-        config.get('data.train_masks')
+        config.get('data.train_masks'),
+        rare_color=rare_color,
     )
     oversample = config.get('training.oversample_plant', 2)
-    print(f"  Plant donors: {len(plant_samples)} images (oversample ×{oversample-1})")
+    print(f"  Rare-class donors: {len(rare_samples)} images (oversample ×{oversample - 1})")
     
     # Build datasets
     print("\n📂 Building datasets...")
@@ -70,7 +72,7 @@ def train(config, args):
         config.get('data.train_masks'),
         config,
         training=True,
-        plant_samples=plant_samples
+        plant_samples=rare_samples,
     )
     test_ds, _ = build_dataset(
         config.get('data.test_images'),
@@ -137,14 +139,9 @@ def train(config, args):
         # Training epoch
         losses = []
         t0 = time.time()
-        
+
         for step, (xb, yb) in enumerate(train_ds.take(steps_per_epoch)):
-            # Apply CutMix
-            xb_np, yb_np = cutmix_batch(xb.numpy(), yb.numpy(), config)
-            xb_t = tf.constant(xb_np, dtype=tf.float32)
-            yb_t = tf.constant(yb_np, dtype=tf.uint8)
-            
-            losses.append(float(train_step(xb_t, yb_t)))
+            losses.append(float(train_step(xb, yb)))
             
             if step % 20 == 0 and step > 0:
                 print(f"    step {step}/{steps_per_epoch} | "

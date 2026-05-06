@@ -6,12 +6,15 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="marea-net",
     version="5.5.0",
-    author="Your Name",
-    author_email="your.email@example.com",
-    description="Marine-Aware REsilient Architecture for Underwater Semantic Segmentation",
+    author="Adeel Mukhtar, Usman Ali",
+    author_email="2021bme123@student.uet.edu.pk",
+    description=(
+        "Marine-Aware Resilient Architecture for Underwater Semantic Segmentation "
+        "(CVPR 2026)"
+    ),
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/marea-net",
+    url="https://github.com/adeelmukhtar/marea-net",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 4 - Beta",
@@ -25,11 +28,11 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        "tensorflow>=2.10.0",
-        "numpy>=1.21.0",
-        "opencv-python>=4.6.0",
-        "Pillow>=9.0.0",
+        "tensorflow>=2.12.0,<2.16.0",
+        "numpy>=1.23.0,<2.0.0",
+        "opencv-python>=4.7.0",
+        "Pillow>=9.4.0",
         "pyyaml>=6.0",
-        "tqdm>=4.64.0",
+        "tqdm>=4.65.0",
     ],
 )

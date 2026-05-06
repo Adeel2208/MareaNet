@@ -1,0 +1,71 @@
+# MAREA-Net v5.5-CNX — DUT-USEG configuration
+# 5-class echinoderm segmentation (sea cucumber, sea urchin, scallop, starfish, background)
+# Rare class: scallop (class index 3)
+
+model:
+  name: "MAREA_Net_v5.5_ConvNeXtBase_DUT"
+  input_height: 320
+  input_width: 320
+  num_classes: 5
+  backbone: "ConvNeXtBase"
+  backbone_weights: "imagenet"
+
+training:
+  batch_size: 8
+  epochs: 100
+  unfreeze_epoch: 10
+
+  lr_warmup: 1.0e-5
+  lr_max: 1.0e-4
+  lr_min: 1.0e-6
+  warmup_epochs: 5
+  weight_decay: 1.0e-4
+
+  tversky_alpha: 0.3
+  tversky_beta: 0.7
+  ohem_keep_ratio: 0.7
+  label_smoothing: 0.05
+  rare_dice_weight: 0.15
+
+  # Scallop is the rare class on DUT-USEG
+  rare_class_index: 3
+  rare_class_color: [0, 255, 0]
+  oversample_plant: 3   # 3× oversampling for scallop (27× rarer than sea urchin)
+
+classes:
+  names:
+    - "Background"
+    - "Sea Cucumber"
+    - "Sea Urchin"
+    - "Scallop"
+    - "Starfish"
+
+  # Higher gamma for scallop (rarest class)
+  gammas: [1.0, 2.0, 2.0, 5.0, 2.0]
+
+  weight_floors:
+    3: 5.0   # Scallop — minimum weight floor
+
+  # DUT-USEG palette (matches dataset annotation colours)
+  palette:
+    - [0,   0,   0]    # Background
+    - [255, 0,   0]    # Sea Cucumber
+    - [0,   0,   255]  # Sea Urchin
+    - [0,   255, 0]    # Scallop
+    - [255, 255, 0]    # Starfish
+
+data:
+  train_images: "data/dutuseg/train/images"
+  train_masks:  "data/dutuseg/train/masks"
+  test_images:  "data/dutuseg/test/images"
+  test_masks:   "data/dutuseg/test/masks"
+
+gpu:
+  memory_growth: true
+  mixed_precision: "float32"
+  xla_jit: true
+
+inference:
+  tta_augmentations: 8
+  temperature: 1.0
+  batch_size: 4

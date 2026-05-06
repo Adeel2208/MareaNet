@@ -1,4 +1,11 @@
-"""Custom layers for MAREA-Net architecture."""
+"""Custom layers for MAREA-Net architecture.
+
+Layer naming follows the paper exactly:
+  - SBCC  : Scale-Balanced Channel Calibration  (Decoder L4)
+  - DSTS  : Dual-Scale Tone Scaling             (Decoder L3)
+  - CGA   : Content-Guided Attention fusion     (all skip connections)
+  - SimAM : Simple, Parameter-Free Attention    (ASPP bottleneck)
+"""
 
 import tensorflow as tf
 from tensorflow.keras import layers
@@ -70,23 +77,40 @@ class SBCC(layers.Layer):
         return config
 
 
-class WDTS(layers.Layer):
-    """Wavelet-inspired Dual-scale Texture Sharpening."""
-    
+class DSTS(layers.Layer):
+    """Dual-Scale Tone Scaling (DSTS).
+
+    Parallel 3×3 and 5×5 depthwise convolutions capture fine texture and
+    coarser structure respectively.  Their outputs are fused, projected, and
+    modulated by a sigmoid gate before being added back via a residual
+    connection.  The sigmoid gate scales (``tones'') feature activations
+    channel-wise; the gated residual lets the module zero out its own
+    contribution when incoming features are already informative.
+
+    Applied at Decoder L3 (40×40).
+    """
+
     def __init__(self, channels, **kwargs):
         super().__init__(**kwargs)
+        self.channels = channels
         self.dw3 = layers.DepthwiseConv2D(3, padding='same', activation='relu')
         self.dw5 = layers.DepthwiseConv2D(5, padding='same', activation='relu')
         self.fuse = layers.Conv2D(channels, 1, padding='same')
         self.gate = layers.Conv2D(channels, 1, padding='same', activation='sigmoid')
         self.bn = layers.BatchNormalization()
-    
+
     def call(self, x, training=None):
-        combined = self.bn(self.fuse(self.dw3(x) + self.dw5(x)))
+        combined = self.bn(self.fuse(self.dw3(x) + self.dw5(x)), training=training)
         return x * self.gate(combined) + x
-    
+
     def get_config(self):
-        return super().get_config()
+        config = super().get_config()
+        config['channels'] = self.channels
+        return config
+
+
+# Backward-compatibility alias (older checkpoints may use the name WDTS).
+WDTS = DSTS
 
 
 class CGAFusion(layers.Layer):
@@ -132,14 +156,21 @@ class CGAFusion(layers.Layer):
 
 
 class MAREADecoderBlock(layers.Layer):
-    """MAREA Decoder Block with optional SBCC and WDTS modules."""
-    
-    def __init__(self, filters, use_sbcc=False, use_wdts=False, dropout=0.15, **kwargs):
+    """MAREA Decoder Block with optional SBCC and DSTS modules.
+
+    Args:
+        filters:   Number of output channels.
+        use_sbcc:  If True, apply SBCC after the first conv stage (Decoder L4).
+        use_dsts:  If True, apply DSTS after the first conv stage (Decoder L3).
+        dropout:   Dropout rate applied at the end of the block.
+    """
+
+    def __init__(self, filters, use_sbcc=False, use_dsts=False, dropout=0.15, **kwargs):
         super().__init__(**kwargs)
         self.filters = filters
         self.use_sbcc = use_sbcc
-        self.use_wdts = use_wdts
-        
+        self.use_dsts = use_dsts
+
         self.up = layers.UpSampling2D(2, interpolation='bilinear')
         self.cga = CGAFusion(filters)
         self.conv1 = layers.Conv2D(filters, 3, padding='same', kernel_initializer='he_normal')
@@ -148,29 +179,32 @@ class MAREADecoderBlock(layers.Layer):
         self.bn2 = layers.BatchNormalization()
         self.drop = layers.Dropout(dropout)
         self.sbcc = SBCC(filters) if use_sbcc else None
-        self.wdts = WDTS(filters) if use_wdts else None
-    
+        self.dsts = DSTS(filters) if use_dsts else None
+
     def call(self, x, skip, training=None):
         x = self.up(x)
-        x = tf.cast(tf.image.resize(x, [tf.shape(skip)[1], tf.shape(skip)[2]], 
-                                     method='bilinear'), x.dtype)
+        # Align spatial size to skip connection (handles odd-sized feature maps)
+        x = tf.cast(
+            tf.image.resize(x, [tf.shape(skip)[1], tf.shape(skip)[2]], method='bilinear'),
+            x.dtype,
+        )
         fused = self.cga(x, skip, training=training)
         fused = tf.nn.relu(self.bn1(self.conv1(fused), training=training))
-        
+
         if self.sbcc is not None:
             fused = self.sbcc(fused, training=training)
-        if self.wdts is not None:
-            fused = self.wdts(fused, training=training)
-        
+        if self.dsts is not None:
+            fused = self.dsts(fused, training=training)
+
         fused = tf.nn.relu(self.bn2(self.conv2(fused), training=training))
         return self.drop(fused, training=training)
-    
+
     def get_config(self):
         config = super().get_config()
         config.update({
-            "filters": self.filters,
-            "use_sbcc": self.use_sbcc,
-            "use_wdts": self.use_wdts
+            'filters': self.filters,
+            'use_sbcc': self.use_sbcc,
+            'use_dsts': self.use_dsts,
         })
         return config
 

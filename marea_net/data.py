@@ -123,31 +123,41 @@ def find_image_mask_pairs(img_dir, msk_dir):
     return pairs
 
 
-def find_plant_samples(img_dir, msk_dir):
+def find_rare_class_samples(img_dir, msk_dir, rare_color=(0, 255, 0)):
     """
-    Find images containing aquatic plants (class 2, green color).
-    
+    Find images containing the rare class, identified by its RGB palette colour.
+
+    Default colour (0, 255, 0) corresponds to Aquatic Plants on SUIM.
+    For DUT-USEG scallop use (0, 255, 0) as well (same palette slot).
+
     Args:
-        img_dir: Directory containing images
-        msk_dir: Directory containing masks
-        
+        img_dir:    Directory containing images.
+        msk_dir:    Directory containing masks.
+        rare_color: (R, G, B) tuple of the rare class colour.
+
     Returns:
-        List of (image_path, mask_path) tuples for plant-containing images
+        List of (image_path, mask_path) tuples for images that contain the
+        rare class.
     """
+    r, g, b = rare_color
     results = []
     pairs = find_image_mask_pairs(img_dir, msk_dir)
-    
+
     for ip, mp in pairs:
         try:
-            msk = tf.image.decode_image(tf.io.read_file(mp), channels=3, 
-                                        expand_animations=False).numpy()
-            # Check for green pixels (aquatic plants)
-            if ((msk[..., 0] == 0) & (msk[..., 1] == 255) & (msk[..., 2] == 0)).any():
+            msk = tf.image.decode_image(
+                tf.io.read_file(mp), channels=3, expand_animations=False
+            ).numpy()
+            if ((msk[..., 0] == r) & (msk[..., 1] == g) & (msk[..., 2] == b)).any():
                 results.append((ip, mp))
         except Exception as e:
             print(f"  Warning: skipping {mp}: {e}")
-    
+
     return results
+
+
+# Backward-compatibility alias
+find_plant_samples = find_rare_class_samples
 
 
 def build_dataset(img_dir, msk_dir, config: Config, training=True, plant_samples=None):

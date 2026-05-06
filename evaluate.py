@@ -91,17 +91,12 @@ def evaluate(model, config, args):
         current_ious = [m['iou'] for m in metrics['per_class']]
         print_comparison(baseline_name, baseline_ious, current_ious, class_names)
     else:
-        # Compare with known baselines
-        print("\n📊 Comparison with published results:")
-        
-        # AquaSAM baseline
-        aquasam_ious = [0.8234, 0.7782, 0.4292, 0.7885, 0.8408, 0.7582, 0.6815, 0.6808]
+        # Published SUIM results (Table 2 in the paper, 1,225/300 split, 8-fold TTA)
+        # Only shown when --compare_baseline is not provided.
+        segformer_b0_ious = [0.8752, 0.7814, 0.3798, 0.7562, 0.7446, 0.7218, 0.7706, 0.7520]
         current_ious = [m['iou'] for m in metrics['per_class']]
-        print_comparison("AquaSAM (Xu et al. 2024)", aquasam_ious, current_ious, class_names)
-        
-        # MAREA-Net v5.5-GPU (ResNet50) expected
-        marea_v55_ious = [0.8800, 0.7800, 0.3500, 0.7200, 0.7300, 0.6800, 0.7300, 0.6700]
-        print_comparison("MAREA-Net v5.5-GPU (ResNet50)", marea_v55_ious, current_ious, class_names)
+        print_comparison("SegFormer-B0 (Xie et al. 2021)", segformer_b0_ious,
+                         current_ious, class_names)
     
     return metrics
 

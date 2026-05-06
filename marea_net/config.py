@@ -45,9 +45,10 @@ class Config:
                 'tversky_beta': 0.7,
                 'ohem_keep_ratio': 0.7,
                 'label_smoothing': 0.05,
-                'plant_dice_weight': 0.15,
-                'cutmix_prob': 0.3,
-                'oversample_plant': 2
+                'rare_dice_weight': 0.15,
+                'rare_class_index': 2,
+                'rare_class_color': [0, 255, 0],
+                'oversample_plant': 2,
             },
             'classes': {
                 'names': [

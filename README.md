@@ -1,203 +1,239 @@
-# MAREA-Net v5.5-CNX
+# MAREA-Net
 
-**Marine-Aware REsilient Architecture for Underwater Semantic Segmentation**
+**Marine-Aware Resilient Architecture for Underwater Semantic Segmentation**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![TensorFlow 2.x](https://img.shields.io/badge/tensorflow-2.x-orange.svg)](https://www.tensorflow.org/)
+[![TensorFlow 2.12–2.15](https://img.shields.io/badge/tensorflow-2.12--2.15-orange.svg)](https://www.tensorflow.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-MAREA-Net v5.5-CNX is a state-of-the-art deep learning architecture for underwater semantic segmentation, featuring a ConvNeXtBase backbone with custom attention mechanisms and multi-scale feature fusion.
+Official implementation of **MAREA-Net** (CVPR 2026).
 
-## Features
+> Adeel Mukhtar, Usman Ali.  
+> *Marine-Aware Resilient Architecture for Underwater Semantic Segmentation.*  
+> CVPR 2026.
 
-- **ConvNeXtBase Backbone**: Modern CNN architecture replacing ResNet50
-- **Custom Attention Modules**: SimAM, SBCC, WDTS for enhanced feature extraction
-- **Advanced Decoder**: CGA-Fusion with strip pooling and ASPP
-- **Robust Training**: Focal loss, Tversky loss, OHEM, CutMix augmentation
-- **Plant-Aware Loss**: Specialized handling for aquatic vegetation
-- **TTA Support**: 8-fold test-time augmentation for improved accuracy
+---
 
-## Architecture Overview
+## Overview
+
+MAREA-Net is an **enhancement-free** encoder-decoder for underwater semantic segmentation.
+Instead of prepending a separate image-enhancement module, it handles underwater colour
+degradation entirely inside the segmentation network through three targeted mechanisms:
+
+| Module | Location | Role |
+|--------|----------|------|
+| **CGA** — Content-Guided Attention | All skip connections | Suppresses degraded encoder features |
+| **SBCC** — Scale-Balanced Channel Calibration | Decoder L4 (20×20) | Recalibrates channel importance after colour-cast compression |
+| **DSTS** — Dual-Scale Tone Scaling | Decoder L3 (40×40) | Sigmoid-gated dual-kernel feature modulation |
+
+An ASPP bottleneck with Strip Pooling and SimAM captures long-range context.
+Auxiliary segmentation and rare-class presence heads provide deep supervision.
+
+---
+
+## Results
+
+### SUIM (1,225 train / 300 test, 320×320, 8-fold TTA)
+
+| Method | Backbone | Params | mIoU | mF1 |
+|--------|----------|--------|------|-----|
+| Imp. DLv3+ | MobOne-S0 | 5.1M | 59.05 | 62.04 |
+| DeepLab-FN | RepVGG | 26M | 62.40 | 74.20 |
+| AquaSAM | SAM ViT-B | 91M | 63.88 | 79.76 |
+| SegFormer-B0 | MiT-B0 | 3.8M | 72.27 | 83.19 |
+| SegFormer-B2 | MiT-B2 | 25M | 73.61 | **84.38** |
+| SegFormer-B4 | MiT-B4 | 47M | **74.12** | **84.91** |
+| **MAREA-Net (ours)** | **CNXBase** | **93M** | **73.85** | **84.04** |
+
+Three-seed mean: **73.76 ± 0.25%** mIoU.
+
+### DUT-USEG (1,380 train / 107 test, 320×320, 8-fold TTA)
+
+| Method | Backbone | Params | mIoU |
+|--------|----------|--------|------|
+| DeepLabV3+ | MobileNetV2 | 5.8M | 66.68 |
+| UWSegFormer | MiT | 13M | 71.41 |
+| SegFormer-B4 | MiT-B4 | 47M | 73.19 |
+| **MAREA-Net (ours)** | **CNXBase** | **93M** | **74.76** |
+
+### MAS3K (binary mIoU) / USIS10K (semantic mIoU)
+
+| Dataset | MAREA-Net | SegFormer-B0 | SegFormer-B4 |
+|---------|-----------|--------------|--------------|
+| MAS3K   | 76.00 | 74.20 | **77.41** |
+| USIS10K | 68.00 | 64.80 | **71.05** |
+
+### Per-class IoU on SUIM
+
+| Class | Imp. DLv3+ | SegFormer-B0 | SegFormer-B4 | **MAREA-Net** |
+|-------|-----------|--------------|--------------|---------------|
+| Background | 86.12 | 87.52 | **89.32** | 88.96 |
+| Human Divers | 58.24 | 78.14 | 81.57 | **82.24** |
+| Aquatic Plants | 9.53 | 37.98 | 38.05 | **38.77** |
+| Wrecks/Ruins | 56.71 | 75.62 | 75.03 | **75.70** |
+| Robots/ROV | 62.87 | 74.46 | 78.95 | **81.59** |
+| Reefs/Inverts | 65.39 | 72.18 | 73.51 | 73.30 |
+| Fish/Vertebrates | 64.18 | 77.06 | **81.12** | 80.57 |
+| Sea-floor/Rocks | 69.36 | 75.20 | **78.11** | 69.70 |
+
+---
+
+## Architecture
 
 ```
 Input (320×320×3)
-    ↓
-ConvNeXtBase Encoder
-    ├─ Stem:   80×80 @ 128ch
-    ├─ Stage0: 80×80 @ 128ch
-    ├─ Stage1: 40×40 @ 256ch
-    ├─ Stage2: 20×20 @ 512ch
+    ↓  ImageNet normalisation (no UIE preprocessing)
+ConvNeXtBase Encoder  [ImageNet-22k pretrained, ~88M params]
+    ├─ Stem:   80×80 @ 128ch  ──────────────────────────────── skip S1
+    ├─ Stage0: 80×80 @ 128ch  ──────────────────────────────── skip S2
+    ├─ Stage1: 40×40 @ 256ch  ──────────────────────────────── skip S3
+    ├─ Stage2: 20×20 @ 512ch  ──────────────────────────────── skip S4
     └─ Stage3: 10×10 @ 1024ch
     ↓
-ASPP + SimAM (10×10 @ 256ch)
+ASPP + Strip Pooling + SimAM  →  10×10 @ 256ch
+    ├─ Auxiliary head  →  320×320 @ n_cls  [training only]
+    └─ Presence head   →  scalar sigmoid   [training only]
     ↓
-4-Stage Decoder (CGA-Fusion)
-    ├─ L4: 20×20 @ 256ch (SBCC)
-    ├─ L3: 40×40 @ 128ch (WDTS)
-    ├─ L2: 80×80 @ 64ch
-    └─ L1: 80×80 @ 32ch
+4-Stage CGA-Gated Decoder
+    ├─ L4: 20×20 @ 256ch  (CGA + SBCC)
+    ├─ L3: 40×40 @ 128ch  (CGA + DSTS)
+    ├─ L2: 80×80 @  64ch  (CGA)
+    └─ L1: 80×80 @  32ch  (CGA)
     ↓
-Output (320×320×8)
+Two ×2 bilinear upsampling steps  →  320×320 @ n_cls
+    ↓
+Softmax  →  seg_output
 ```
+
+Total parameters: ~93M (ConvNeXtBase 88M + decoder 5M).
+
+---
 
 ## Installation
 
-### Quick Setup (Recommended)
-
-**Windows:**
 ```bash
-setup.bat
-```
-
-**Linux/Mac:**
-```bash
-chmod +x setup.sh
-./setup.sh
-```
-
-### Manual Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/marea-net.git
+git clone https://github.com/adeelmukhtar/marea-net.git
 cd marea-net
 
-# Create virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate   # Windows: venv\Scripts\activate
 
-# Install dependencies
 pip install -r requirements.txt
-
-# Create directories
-mkdir -p data/train/images data/train/masks
-mkdir -p data/test/images data/test/masks
-mkdir -p models results
 ```
 
-## Quick Start
+---
 
-### Training
+## Dataset Preparation
 
-```bash
-python train.py --data_dir /path/to/dataset --epochs 100 --batch_size 8
-```
+MAREA-Net is evaluated on four benchmarks.  All require manual download.
 
-### Inference
+| Dataset | Classes | Images | Paper | Download |
+|---------|---------|--------|-------|----------|
+| **SUIM** | 8 | 1,525 | [Islam et al., IROS 2020](https://ieeexplore.ieee.org/document/9196596) | [Official Site](http://irvlab.cs.umn.edu/resources/suim-dataset) · [GitHub](https://github.com/xahidbuffon/SUIM) |
+| **DUT-USEG** | 5 | 1,487 | [Ma et al., JBUAA 2022](https://bhxb.buaa.edu.cn/bhzk/en/article/doi/10.13700/j.bh.1001-5965.2021.0464) | [GitHub](https://github.com/chongweiliu/DUT-USEG) |
+| **MAS3K** | binary | 3,103 | [Li et al., Bench 2021](https://link.springer.com/chapter/10.1007/978-3-030-71058-3_12) | [GitHub](https://github.com/LinLi-DL/MAS) |
+| **USIS10K** | 7 | 10,632 | [Lian et al., ICML 2024](https://proceedings.mlr.press/v235/lian24c.html) | [GitHub](https://github.com/LiamLian0727/USIS10K) |
 
-```bash
-python inference.py --model_path models/best_model.keras --input_dir /path/to/images --output_dir results
-```
+Run `python scripts/download_dataset.py --dataset <name> --output_dir data` for detailed setup instructions.
 
-### Evaluation
-
-```bash
-python evaluate.py --model_path models/best_model.keras --test_dir /path/to/test
-```
-
-## Dataset Structure
+Expected layout:
 
 ```
-dataset/
+data/
 ├── train/
-│   ├── images/
-│   │   ├── image_001.jpg
-│   │   └── ...
-│   └── masks/
-│       ├── image_001.bmp
-│       └── ...
+│   ├── images/   ← .jpg / .png
+│   └── masks/    ← .bmp / .png  (RGB palette)
 └── test/
     ├── images/
     └── masks/
 ```
 
-## Classes
+---
 
-| ID | Class Name          | Color (RGB)     |
-|----|---------------------|-----------------|
-| 0  | Background          | (0, 0, 0)       |
-| 1  | Human Divers        | (0, 0, 255)     |
-| 2  | Aquatic Plants      | (0, 255, 0)     |
-| 3  | Wrecks/Ruins        | (0, 255, 255)   |
-| 4  | Robots/ROV          | (255, 0, 0)     |
-| 5  | Reefs/Inverts       | (255, 0, 255)   |
-| 6  | Fish/Vertebrates    | (255, 255, 0)   |
-| 7  | Sea-floor/Rocks     | (255, 255, 255) |
+## Training
 
-## Configuration
+```bash
+# SUIM (default config)
+python train.py --data_dir data/suim --epochs 100 --batch_size 8
 
-Edit `config/config.yaml` to customize training parameters:
-
-```yaml
-model:
-  input_size: [320, 320]
-  num_classes: 8
-  
-training:
-  batch_size: 8
-  epochs: 100
-  learning_rate: 1e-4
-  weight_decay: 1e-4
+# DUT-USEG (5 classes, scallop as rare class)
+python train.py \
+  --data_dir data/dutuseg \
+  --config config/config_dutuseg.yaml \
+  --epochs 100
 ```
 
-## Results
+Key training details (see `config/config.yaml`):
 
-| Model | mIoU | Background | Divers | Plants | Wrecks | ROV | Reefs | Fish | Seafloor |
-|-------|------|------------|--------|--------|--------|-----|-------|------|----------|
-| MAREA-Net v5.5-CNX | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+- Phase 1 (epochs 0–9): encoder frozen, LR warm-up 1e-5 → 1e-4
+- Phase 2 (epochs 10–100): full joint training, cosine decay 1e-4 → 1e-6
+- Augmentation: horizontal/vertical flips, 90° rotations, colour jitter
+- Rare-class oversampling: 2× per epoch
+- Loss: Focal-OHEM + Tversky + 0.5·Dice + 0.15·rare-Dice + 0.3·aux + 0.2·presence
+
+---
+
+## Evaluation
+
+```bash
+# Standard evaluation
+python evaluate.py \
+  --model_path models/marea_net_best.keras \
+  --test_dir data/suim/test
+
+# With 8-fold TTA (matches paper numbers)
+python evaluate.py \
+  --model_path models/marea_net_best.keras \
+  --test_dir data/suim/test \
+  --tta
+```
+
+---
+
+## Inference
+
+```bash
+python inference.py \
+  --model_path models/marea_net_best.keras \
+  --input_dir /path/to/images \
+  --output_dir results \
+  --tta \
+  --save_overlay
+```
+
+---
+
+## Running Tests
+
+```bash
+pip install pytest
+pytest tests/ -v
+```
+
+---
 
 ## Citation
 
-If you use this code in your research, please cite:
-
 ```bibtex
-@article{mareanet2024,
-  title={MAREA-Net: Marine-Aware REsilient Architecture for Underwater Semantic Segmentation},
-  author={Your Name},
-  journal={arXiv preprint},
-  year={2024}
+@inproceedings{mukhtar2026marea,
+  title     = {Marine-Aware Resilient Architecture for Underwater Semantic Segmentation},
+  author    = {Mukhtar, Adeel and Ali, Usman},
+  booktitle = {IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year      = {2026}
 }
 ```
 
+---
+
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).
 
-## Acknowledgments
+## Acknowledgements
 
-- ConvNeXt architecture from Facebook Research
-- SUIM dataset for underwater imagery
-- TensorFlow and Keras teams
-
-## Project Structure
-
-```
-marea-net/
-├── marea_net/          # Core package
-│   ├── model.py       # Model architecture
-│   ├── layers.py      # Custom layers
-│   ├── data.py        # Data pipeline
-│   ├── losses.py      # Loss functions
-│   └── metrics.py     # Evaluation metrics
-├── train.py           # Training script
-├── inference.py       # Inference script
-├── evaluate.py        # Evaluation script
-├── config/            # Configuration files
-├── docs/              # Documentation
-├── examples/          # Usage examples
-└── scripts/           # Utility scripts
-```
-
-See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for detailed structure.
-
-## Documentation
-
-- [Quick Start Guide](QUICK_START.md) - Get started in 5 minutes
-- [Architecture Guide](docs/ARCHITECTURE.md) - Model architecture details
-- [Training Guide](docs/TRAINING.md) - Comprehensive training guide
-- [API Reference](docs/API.md) - Complete API documentation
-- [Contributing](CONTRIBUTING.md) - Contribution guidelines
-
-## Contact
-
-For questions and feedback, please open an issue or contact [your.email@example.com](mailto:your.email@example.com).
+- [ConvNeXt](https://github.com/facebookresearch/ConvNeXt) — Facebook Research
+- [SegFormer](https://github.com/NVlabs/SegFormer) — NVIDIA
+- [SUIM](http://irvlab.cs.umn.edu/resources/suim-dataset) — Islam et al., IROS 2020
+- [DEA-Net / CGA](https://github.com/cecret3350/DEA-Net) — Chen et al., IEEE TIP 2024
+- [SimAM](https://github.com/ZjjConan/SimAM) — Yang et al., CVPR 2022
+- [Strip Pooling](https://github.com/Andrew-Qibin/SPNet) — Hou et al., CVPR 2020

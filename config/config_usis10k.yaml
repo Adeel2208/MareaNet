@@ -1,0 +1,75 @@
+# MAREA-Net v5.5-CNX — USIS10K configuration
+# 7-class large-scale underwater segmentation
+# Phase-2 extended to 60 epochs; reduced rare-class oversampling
+
+model:
+  name: "MAREA_Net_v5.5_ConvNeXtBase_USIS10K"
+  input_height: 320
+  input_width: 320
+  num_classes: 7
+  backbone: "ConvNeXtBase"
+  backbone_weights: "imagenet"
+
+training:
+  batch_size: 8
+  epochs: 70          # Phase-1: 0-9, Phase-2: 10-70 (60 epochs)
+  unfreeze_epoch: 10
+
+  lr_warmup: 1.0e-5
+  lr_max: 1.0e-4
+  lr_min: 1.0e-6
+  warmup_epochs: 5
+  weight_decay: 1.0e-4
+
+  tversky_alpha: 0.3
+  tversky_beta: 0.7
+  ohem_keep_ratio: 0.7
+  label_smoothing: 0.05
+  rare_dice_weight: 0.15
+
+  rare_class_index: 2   # Underwater plants
+  rare_class_color: [0, 255, 0]
+  oversample_plant: 2   # Reduced from 2 (large dataset, less imbalance)
+
+classes:
+  names:
+    - "Background"
+    - "Fish"
+    - "Coral Reefs"
+    - "Underwater Plants"
+    - "Human Divers"
+    - "Robots"
+    - "Underwater Ruins"
+
+  gammas: [1.0, 2.0, 2.0, 5.0, 3.0, 3.0, 3.0]
+
+  weight_floors:
+    3: 2.0   # Underwater plants
+    4: 2.0   # Human divers
+    5: 3.0   # Robots
+
+  # Adjust palette to match USIS10K annotation colours
+  palette:
+    - [0,   0,   0]
+    - [0,   0,   255]
+    - [255, 0,   255]
+    - [0,   255, 0]
+    - [255, 255, 0]
+    - [255, 0,   0]
+    - [0,   255, 255]
+
+data:
+  train_images: "data/usis10k/train/images"
+  train_masks:  "data/usis10k/train/masks"
+  test_images:  "data/usis10k/test/images"
+  test_masks:   "data/usis10k/test/masks"
+
+gpu:
+  memory_growth: true
+  mixed_precision: "float32"
+  xla_jit: true
+
+inference:
+  tta_augmentations: 8
+  temperature: 1.0
+  batch_size: 4

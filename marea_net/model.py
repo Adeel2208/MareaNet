@@ -1,4 +1,24 @@
-"""MAREA-Net model architecture."""
+"""MAREA-Net model architecture.
+
+Implements MAREA-Net v5.5 as described in:
+  "Marine-Aware Resilient Architecture for Underwater Semantic Segmentation"
+  Adeel Mukhtar, Usman Ali — CVPR 2026
+
+Architecture summary
+--------------------
+  Input (320×320×3)
+    → ConvNeXtBase encoder  (ImageNet-22k pretrained)
+    → ASPP + Strip Pooling + SimAM bottleneck  (10×10 @ 256ch)
+    → 4-stage CGA-gated decoder
+        L4: 20×20 @ 256ch  (SBCC)
+        L3: 40×40 @ 128ch  (DSTS)
+        L2: 80×80 @  64ch
+        L1: 80×80 @  32ch
+    → Two ×2 bilinear upsampling steps → 320×320
+    → Softmax segmentation head  [seg_output]
+    → Auxiliary deep-supervision head  [aux_output]
+    → Rare-class presence head  [presence_output]
+"""
 
 import tensorflow as tf
 from tensorflow import keras
@@ -54,19 +74,24 @@ def get_convnext_skip_outputs(encoder):
 def build_marea_net(config: Config = None):
     """
     Build MAREA-Net v5.5 with ConvNeXtBase backbone.
-    
+
     Architecture:
-    - ConvNeXtBase encoder with ImageNet weights
-    - ASPP with Strip Pooling on bottleneck
-    - 4-stage decoder with CGA-Fusion
-    - Auxiliary head for deep supervision
-    - Plant presence binary classification head
-    
+      - ConvNeXtBase encoder pretrained on ImageNet-22k
+      - ASPP bottleneck with Strip Pooling and SimAM
+      - 4-stage decoder: CGA skip fusion, SBCC at L4, DSTS at L3
+      - Two-step final upsampling head (×2 + ×2)
+      - Auxiliary segmentation head for deep supervision
+      - Rare-class presence head (binary, sigmoid)
+
     Args:
         config: Configuration object. If None, uses default config.
-        
+
     Returns:
-        Keras Model with outputs: [seg_output, aux_output, plant_output]
+        Keras Model with three outputs:
+          [seg_output, aux_output, presence_output]
+          seg_output      — (B, H, W, n_cls) softmax probabilities
+          aux_output      — (B, H, W, n_cls) auxiliary softmax (training only)
+          presence_output — (B, 1) sigmoid rare-class presence score
     """
     if config is None:
         config = Config()
@@ -95,8 +120,10 @@ def build_marea_net(config: Config = None):
         layers.UpSampling2D(32, interpolation='bilinear')(aspp)
     )
     
-    # Plant presence binary head
-    plant_out = layers.Dense(1, activation='sigmoid', name='plant_output')(
+    # Rare-class presence binary head (sigmoid)
+    # Predicts whether the rare class (e.g. aquatic plants on SUIM,
+    # scallop on DUT-USEG) is present anywhere in the image.
+    presence_out = layers.Dense(1, activation='sigmoid', name='presence_output')(
         layers.Dense(64, activation='relu')(
             layers.GlobalAveragePooling2D()(aspp)
         )
@@ -104,7 +131,7 @@ def build_marea_net(config: Config = None):
     
     # 4-stage decoder
     d4 = MAREADecoderBlock(256, use_sbcc=True, name='decoder_l4')(aspp, skip4)
-    d3 = MAREADecoderBlock(128, use_wdts=True, name='decoder_l3')(d4, skip3)
+    d3 = MAREADecoderBlock(128, use_dsts=True, name='decoder_l3')(d4, skip3)
     d2 = MAREADecoderBlock(64, name='decoder_l2')(d3, skip2)
     d1 = MAREADecoderBlock(32, name='decoder_l1')(d2, skip1)
     
@@ -123,7 +150,7 @@ def build_marea_net(config: Config = None):
     
     model = keras.Model(
         inputs=inp,
-        outputs=[seg_out, aux_out, plant_out],
+        outputs=[seg_out, aux_out, presence_out],
         name="MAREA_Net_v5.5_ConvNeXtBase"
     )
     

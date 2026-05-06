@@ -1,0 +1,61 @@
+# MAREA-Net v5.5-CNX — MAS3K configuration
+# Binary marine-animal vs. background segmentation
+# No rare-class presence head (disable_presence_head: true)
+
+model:
+  name: "MAREA_Net_v5.5_ConvNeXtBase_MAS3K"
+  input_height: 320
+  input_width: 320
+  num_classes: 2
+  backbone: "ConvNeXtBase"
+  backbone_weights: "imagenet"
+
+training:
+  batch_size: 8
+  epochs: 100
+  unfreeze_epoch: 10
+
+  lr_warmup: 1.0e-5
+  lr_max: 1.0e-4
+  lr_min: 1.0e-6
+  warmup_epochs: 5
+  weight_decay: 1.0e-4
+
+  tversky_alpha: 0.3
+  tversky_beta: 0.7
+  ohem_keep_ratio: 0.7
+  label_smoothing: 0.05
+  rare_dice_weight: 0.0   # No rare-class Dice for binary task
+
+  rare_class_index: 1     # Marine animal
+  rare_class_color: [255, 255, 255]
+  oversample_plant: 1     # No oversampling needed for binary task
+
+classes:
+  names:
+    - "Background"
+    - "Marine Animal"
+
+  gammas: [1.0, 3.0]
+  weight_floors:
+    1: 2.0
+
+  palette:
+    - [0,   0,   0]      # Background
+    - [255, 255, 255]    # Marine Animal
+
+data:
+  train_images: "data/mas3k/train/images"
+  train_masks:  "data/mas3k/train/masks"
+  test_images:  "data/mas3k/test/images"
+  test_masks:   "data/mas3k/test/masks"
+
+gpu:
+  memory_growth: true
+  mixed_precision: "float32"
+  xla_jit: true
+
+inference:
+  tta_augmentations: 8
+  temperature: 1.0
+  batch_size: 4
