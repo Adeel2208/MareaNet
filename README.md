@@ -6,12 +6,6 @@
 [![TensorFlow 2.12–2.15](https://img.shields.io/badge/tensorflow-2.12--2.15-orange.svg)](https://www.tensorflow.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Official implementation of **MAREA-Net** (CVPR 2026).
-
-> Adeel Mukhtar, Usman Ali.  
-> *Marine-Aware Resilient Architecture for Underwater Semantic Segmentation.*  
-> CVPR 2026.
-
 ---
 
 ## Overview
@@ -212,7 +206,7 @@ pytest tests/ -v
 
 ---
 
-## Reproducibility (CVPR 2026 Submission)
+## Reproducibility
 
 ### Dataset Splits
 
