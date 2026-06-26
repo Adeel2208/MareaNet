@@ -24,7 +24,7 @@ degradation entirely inside the segmentation network through three targeted mech
 |--------|----------|------|
 | **CGA** — Content-Guided Attention | All skip connections | Suppresses degraded encoder features |
 | **SBCC** — Scale-Balanced Channel Calibration | Decoder L4 (20×20) | Recalibrates channel importance after colour-cast compression |
-| **DSTS** — Dual-Scale Tone Scaling | Decoder L3 (40×40) | Sigmoid-gated dual-kernel feature modulation |
+| **DSTS** — Dual-Scale Gated Feature Modulation | Decoder L3 (40×40) | Sigmoid-gated dual-kernel feature modulation |
 
 An ASPP bottleneck with Strip Pooling and SimAM captures long-range context.
 Auxiliary segmentation and rare-class presence heads provide deep supervision.
@@ -212,16 +212,59 @@ pytest tests/ -v
 
 ---
 
-## Citation
+## Reproducibility (CVPR 2026 Submission)
 
-```bibtex
-@inproceedings{mukhtar2026marea,
-  title     = {Marine-Aware Resilient Architecture for Underwater Semantic Segmentation},
-  author    = {Mukhtar, Adeel and Ali, Usman},
-  booktitle = {IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
-  year      = {2026}
-}
+### Dataset Splits
+
+The paper uses **custom splits** for reproducibility:
+
+- **SUIM**: 1,225 train / 300 test (custom split, not default 1,525/110)
+- **DUT-USEG**: 1,380 train / 107 test (UWSegFormer protocol)
+- **MAS3K**: 1,769 train / 1,141 test (default split)
+- **USIS10K**: 8,080 train / 2,552 test (official semantic protocol)
+
+Generate splits with seed 42:
+
+```bash
+python scripts/generate_splits.py --dataset suim --data_dir data/suim --output_dir splits --seed 42
+python scripts/verify_splits.py --dataset suim --data_dir data/suim --splits_dir splits
 ```
+
+### Reproduce Paper Results
+
+**Table 3 - SUIM (73.85% mIoU, 8-fold TTA)**
+```bash
+python train.py --data_dir data/suim --config config/config.yaml --epochs 100 --seed 42
+python evaluate.py --model_path models/marea_net_best.keras --test_dir data/suim/test --tta
+```
+
+**Table 5 - DUT-USEG (74.76% mIoU, 8-fold TTA)**
+```bash
+python train.py --data_dir data/dutuseg --config config/config_dutuseg.yaml --epochs 100 --seed 42
+python evaluate.py --model_path models/marea_net_best.keras --test_dir data/dutuseg/test --tta
+```
+
+**Table 6 - MAS3K (76.00% mIoU, 8-fold TTA)**
+```bash
+python train.py --data_dir data/mas3k --config config/config_mas3k.yaml --epochs 100 --seed 42
+python evaluate.py --model_path models/marea_net_best.keras --test_dir data/mas3k/test --tta
+```
+
+**Table 7 - USIS10K (68.00% mIoU, 8-fold TTA)**
+```bash
+python train.py --data_dir data/usis10k --config config/config_usis10k.yaml --epochs 70 --seed 42
+python evaluate.py --model_path models/marea_net_best.keras --test_dir data/usis10k/test --tta
+```
+
+**Multi-seed variance (Table 8)**: 73.76 ± 0.25% mIoU on SUIM (seeds: 42, 123, 456)
+
+### Pretrained Checkpoints
+
+Download from [GitHub Releases](https://github.com/Adeel2208/MareaNet/releases):
+- `marea_net_suim_best.keras` (73.85% mIoU)
+- `marea_net_dutuseg_best.keras` (74.76% mIoU)
+- `marea_net_mas3k_best.keras` (76.00% mIoU)
+- `marea_net_usis10k_best.keras` (68.00% mIoU)
 
 ---
 

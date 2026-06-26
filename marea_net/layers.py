@@ -2,7 +2,7 @@
 
 Layer naming follows the paper exactly:
   - SBCC  : Scale-Balanced Channel Calibration  (Decoder L4)
-  - DSTS  : Dual-Scale Tone Scaling             (Decoder L3)
+  - DSTS  : Dual-Scale Gated Feature Modulation (Decoder L3)
   - CGA   : Content-Guided Attention fusion     (all skip connections)
   - SimAM : Simple, Parameter-Free Attention    (ASPP bottleneck)
 """
@@ -55,39 +55,83 @@ class StripPooling(layers.Layer):
 
 
 class SBCC(layers.Layer):
-    """Spatial-Boundary Channel Calibration."""
-    
-    def __init__(self, channels, reduction=8, **kwargs):
+    """Scale-Balanced Channel Calibration (SBCC).
+
+    Residual gain-calibration block with two branches combined multiplicatively
+    (paper Eq. 1-4), applied at Decoder L4 (20x20).
+
+      - Channel branch (Eq. 1-2): squeeze-and-excitation. Global average pool
+        followed by a two-layer bottleneck MLP with reduction ratio r=16,
+        producing a per-channel gain s in R^C.
+      - Spatial branch (Eq. 3): a pointwise 1x1 convolution collapses the
+        channel axis to a single saliency map m in R^{HxWx1}.
+      - Calibration (Eq. 4): the gates are combined into a per-position,
+        per-channel field A = s_c * m_{i,j} in [0,1], then mapped to a
+        unity-centred bidirectional gain
+
+            SBCC(F) = F * (1 + alpha * (2A - 1)),
+
+        where alpha in [0,1] is a learned scalar (initialised at 0.5). Because
+        2A-1 in [-1,1], the multiplier ranges over [1-alpha, 1+alpha], so a
+        gate scored below 0.5 is genuinely attenuated (<1) while one scored
+        above 0.5 is amplified (>1); at A=0.5 the block is exactly identity.
+    """
+
+    def __init__(self, channels, reduction=16, **kwargs):
         super().__init__(**kwargs)
         self.channels = channels
+        self.reduction = reduction
         mid = max(channels // reduction, 8)
         self.gap = layers.GlobalAveragePooling2D(keepdims=True)
         self.fc1 = layers.Dense(mid, activation='relu', kernel_initializer='he_normal')
-        self.fc2 = layers.Dense(channels, activation='sigmoid', kernel_initializer='zeros')
-        self.atten_conv = layers.Conv2D(channels, 1, padding='same', activation='sigmoid')
-    
+        self.fc2 = layers.Dense(channels, activation='sigmoid')
+        # Spatial branch: W_s in R^{1x1xCx1} -> single-channel saliency map (Eq. 3)
+        self.spatial = layers.Conv2D(1, 1, padding='same', activation='sigmoid')
+
+    def build(self, input_shape):
+        # Learned bidirectional-gain scalar alpha, initialised at 0.5 (Eq. 4)
+        self.alpha = self.add_weight(
+            name='alpha',
+            shape=(),
+            initializer=tf.constant_initializer(0.5),
+            constraint=lambda a: tf.clip_by_value(a, 0.0, 1.0),
+            trainable=True,
+        )
+        super().build(input_shape)
+
     def call(self, x, training=None):
-        excite = self.fc2(self.fc1(tf.squeeze(self.gap(x), axis=[1, 2])))
-        excite = tf.reshape(excite, [tf.shape(x)[0], 1, 1, self.channels])
-        return x * excite * self.atten_conv(x)
-    
+        s = self.fc2(self.fc1(self.gap(x)))   # [B,1,1,C]  per-channel gain (Eq. 2)
+        m = self.spatial(x)                   # [B,H,W,1]  per-location gate (Eq. 3)
+        a = s * m                             # [B,H,W,C]  attention field A in [0,1]
+        return x * (1.0 + self.alpha * (2.0 * a - 1.0))   # unity-centred gain (Eq. 4)
+
     def get_config(self):
         config = super().get_config()
         config["channels"] = self.channels
+        config["reduction"] = self.reduction
         return config
 
 
 class DSTS(layers.Layer):
-    """Dual-Scale Tone Scaling (DSTS).
+    """Dual-Scale Gated Feature Modulation (DSTS).
 
-    Parallel 3×3 and 5×5 depthwise convolutions capture fine texture and
-    coarser structure respectively.  Their outputs are fused, projected, and
-    modulated by a sigmoid gate before being added back via a residual
-    connection.  The sigmoid gate scales (``tones'') feature activations
-    channel-wise; the gated residual lets the module zero out its own
-    contribution when incoming features are already informative.
+    A depthwise multi-kernel residual attention block (paper Eq. 5-8), applied
+    at Decoder L3 (40x40).  The name is retained for continuity with the
+    released code; the module operates on feature magnitudes only and performs
+    no photometric tone correction.
 
-    Applied at Decoder L3 (40×40).
+      - Multi-scale depthwise extraction (Eq. 5):
+            Gm = DWConv_3x3(G) + DWConv_5x5(G)
+        The 3x3 kernel captures fine texture; the 5x5 kernel captures coarser
+        structure.
+      - Pointwise projection and normalisation (Eq. 6):
+            Gp = BN(Wp * Gm)
+        A 1x1 pointwise convolution mixes channels that the depthwise stages
+        keep independent.
+      - Sigmoid gate and residual fusion (Eq. 7-8):
+            T = sigmoid(Wg * Gp),   DSTS(G) = G + T (.) Gp
+        The residual fusion lets the block zero out its own contribution (by
+        driving T -> 0) when the incoming features are already informative.
     """
 
     def __init__(self, channels, **kwargs):
@@ -95,13 +139,15 @@ class DSTS(layers.Layer):
         self.channels = channels
         self.dw3 = layers.DepthwiseConv2D(3, padding='same', activation='relu')
         self.dw5 = layers.DepthwiseConv2D(5, padding='same', activation='relu')
-        self.fuse = layers.Conv2D(channels, 1, padding='same')
-        self.gate = layers.Conv2D(channels, 1, padding='same', activation='sigmoid')
+        self.fuse = layers.Conv2D(channels, 1, padding='same')          # Wp (Eq. 6)
         self.bn = layers.BatchNormalization()
+        self.gate = layers.Conv2D(channels, 1, padding='same', activation='sigmoid')  # Wg (Eq. 7)
 
     def call(self, x, training=None):
-        combined = self.bn(self.fuse(self.dw3(x) + self.dw5(x)), training=training)
-        return x * self.gate(combined) + x
+        gm = self.dw3(x) + self.dw5(x)                       # Eq. 5
+        gp = self.bn(self.fuse(gm), training=training)       # Eq. 6  (Gp)
+        t = self.gate(gp)                                    # Eq. 7  (T)
+        return x + t * gp                                    # Eq. 8  (G + T (.) Gp)
 
     def get_config(self):
         config = super().get_config()
@@ -114,7 +160,16 @@ WDTS = DSTS
 
 
 class CGAFusion(layers.Layer):
-    """Cross-scale Gated Attention Fusion."""
+    """Content-Guided Attention (CGA) skip-connection fusion.
+
+    Borrowed from DEA-Net dehazing (Chen et al., IEEE TIP 2024).  Projects
+    decoder and skip features to a common channel count, adds them, and
+    computes channel attention via a two-layer MLP on global-average-pooled
+    features plus spatial attention via a 7x7 convolution on concatenated mean
+    and max maps.  A learned gate blends the two signals so that informative
+    skip features pass through with higher weight while degraded regions are
+    attenuated.
+    """
     
     def __init__(self, channels, reduction=8, **kwargs):
         super().__init__(**kwargs)

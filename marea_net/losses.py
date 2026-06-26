@@ -226,7 +226,7 @@ def create_loss_fn(class_weights, config: Config):
             + 0.5  * dice_loss(y_true, seg_pred, n_cls)
             + rare_dice_weight * plant_dice_loss(y_true, seg_pred, n_cls,
                                                  plant_class=rare_class_idx)
-            + 0.3  * focal_ce_ohem(y_true, aux_pred, cw, gm, 0.9, label_smooth)
+            + 0.3  * focal_ce_ohem(y_true, aux_pred, cw, gm, ohem_keep, label_smooth)
             + 0.2  * rare_class_presence_loss(y_true, presence_pred,
                                               rare_class_index=rare_class_idx)
         )
